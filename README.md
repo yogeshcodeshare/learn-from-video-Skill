@@ -1,12 +1,12 @@
 # learn-from-video
 
-> A Claude Code skill that turns any YouTube video into a comprehensive, professional learning report — capturing everything that was **spoken AND shown on screen**.
+> A Claude Code skill that turns any online video into a comprehensive, professional learning report — capturing everything that was **spoken AND shown on screen**.
 
 ---
 
 ## What It Does
 
-When you share a YouTube URL, this skill:
+When you share a video URL or file, this skill:
 
 1. **Fetches the full transcript** with timestamps
 2. **Downloads the video** and extracts screenshots at key moments (every 20–30 seconds + targeted visual timestamps)
@@ -35,7 +35,6 @@ Make sure the following are installed on your machine:
 | Tool | Install |
 |------|---------|
 | Python 3 | [python.org](https://python.org) |
-| `youtube-transcript-api` | `pip install youtube-transcript-api` |
 | `yt-dlp` | `pip install yt-dlp` |
 | `ffmpeg` | `brew install ffmpeg` (Mac) / `apt install ffmpeg` (Linux) |
 | Node.js + npm | [nodejs.org](https://nodejs.org) |
@@ -46,28 +45,33 @@ The skill will attempt to auto-install missing Python packages on first run.
 
 ## How to Use
 
-Just share a YouTube URL and ask for notes. Claude will trigger this skill automatically.
+Just share a video URL or file and ask for notes. Claude will trigger this skill automatically.
 
 ### Trigger phrases:
 
-- `learn from this video: https://youtube.com/watch?v=...`
-- `learnFromVideo https://youtube.com/watch?v=...`
-- `create notes from this YouTube video`
+- `learn from this video: https://video-url-here`
+- `learnFromVideo https://video-url-here`
+- `create notes from this video`
 - `make notes for this video`
-- `summarize this YouTube video in detail`
+- `summarize this video in detail`
 - `take notes from this lecture`
 - `I don't have time to watch this — create notes`
 
 ### Single video:
 ```
-learnFromVideo https://www.youtube.com/watch?v=VIDEO_ID
+learnFromVideo https://www.video-platform.com/watch?v=VIDEO_ID
 ```
 
 ### Multiple videos on the same topic:
 ```
 learnFromVideo these two videos and combine the notes:
-https://www.youtube.com/watch?v=VIDEO_ID_1
-https://www.youtube.com/watch?v=VIDEO_ID_2
+https://www.video-platform.com/watch?v=VIDEO_ID_1
+https://www.video-platform.com/watch?v=VIDEO_ID_2
+```
+
+### Local video file:
+```
+learnFromVideo /path/to/local/video.mp4
 ```
 
 ---
@@ -83,7 +87,7 @@ The skill generates a `.docx` Word document saved to your workspace:
 
 | Section | Description |
 |---------|-------------|
-| Cover Page | Title, channel, URL, date, duration |
+| Cover Page | Title, channel/source, URL, date, duration |
 | Table of Contents | Manual TOC — works in Word, Google Docs, LibreOffice |
 | Executive Summary | 3–5 key takeaways, audience, difficulty level |
 | Core Content | Adaptive — follows the video's natural flow |
@@ -115,7 +119,7 @@ For a 45-minute video on Claude Code tips, the skill produces a 30–50 page Wor
 
 ## Multi-Video Support
 
-Provide multiple YouTube URLs on the same topic and the skill will:
+Provide multiple video URLs on the same topic and the skill will:
 
 - Merge overlapping content by theme (not listed video-by-video)
 - Cross-reference where videos agree or offer different perspectives
@@ -134,16 +138,17 @@ Provide multiple YouTube URLs on the same topic and the skill will:
 | Very long video (>1 hour) | Screenshot interval increased, "Reading Guide" added |
 | Playlist URL | Each video extracted and processed individually |
 | Partial / garbled transcript | Unclear segments marked `[unclear at timestamp]` |
+| Local video file (.mp4, .mkv, etc.) | Processed directly with ffmpeg — no download needed |
 
 ---
 
 ## How It Works (Under the Hood)
 
 ```
-YouTube URL
+Video URL / File
     │
     ▼
-1. Fetch Transcript (youtube-transcript-api)
+1. Fetch Transcript (yt-dlp / auto-captions / manual paste)
     │  → timestamps, chapter detection
     │
     ▼
@@ -190,9 +195,9 @@ The report should be thorough enough that **reading it gives 90%+ of the value o
 ## Attribution
 
 Every generated document includes:
-- Full video URL and channel name on the cover page
-- Footer: *"Notes generated from YouTube video for personal learning use"*
-- Final page: *"For the complete experience, watch the original video at [URL]. All content credit to [channel name]."*
+- Full video URL/source and channel name on the cover page
+- Footer: *"Notes generated from video for personal learning use"*
+- Final page: *"For the complete experience, watch the original video at [URL]. All content credit to [channel/creator name]."*
 
 This skill is intended for **personal learning use** only. Respect the original creator's content.
 
