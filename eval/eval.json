@@ -1,0 +1,69 @@
+{
+  "skill_name": "learn-from-video",
+  "version": "3.0",
+  "description": "Binary assertions for automated quality evaluation of learn-from-video output",
+  "tests": [
+    {
+      "name": "short_tutorial_video",
+      "prompt": "Create learning notes from this video: [INSERT_SHORT_TUTORIAL_URL]",
+      "note": "Replace with an actual short tutorial video URL (under 10 minutes) for real testing",
+      "assertions": [
+        { "id": "A01", "text": "Output is a valid .docx file that passes validate.py", "type": "binary" },
+        { "id": "A02", "text": "Document contains a cover page with video title, URL, channel/source, date, and duration", "type": "binary" },
+        { "id": "A03", "text": "Document contains a Table of Contents (manual, not empty widget)", "type": "binary" },
+        { "id": "A04", "text": "Document contains an Executive Summary section under 500 words", "type": "binary" },
+        { "id": "A05", "text": "At least 5 screenshots are embedded in the document via ImageRun", "type": "binary" },
+        { "id": "A06", "text": "Every embedded screenshot has a caption with timestamp", "type": "binary" },
+        { "id": "A07", "text": "No sections in the document are empty (zero content paragraphs)", "type": "binary" },
+        { "id": "A08", "text": "All code blocks have a language label (JavaScript, Python, bash, etc.)", "type": "binary" },
+        { "id": "A09", "text": "Code blocks captured from video are marked with FROM VIDEO [timestamp]", "type": "binary" },
+        { "id": "A10", "text": "Code blocks with added completions are marked with ADDED FOR COMPLETENESS", "type": "binary" },
+        { "id": "A11", "text": "At least one Mermaid diagram is present if the video showed any architecture/flow", "type": "binary" },
+        { "id": "A12", "text": "Document contains a Quick Reference section with tables", "type": "binary" },
+        { "id": "A13", "text": "Document contains a Source Videos & Resources section with clickable URL", "type": "binary" },
+        { "id": "A14", "text": "Header contains video title and 'learnFromVideo Notes'", "type": "binary" },
+        { "id": "A15", "text": "Footer contains page numbers", "type": "binary" },
+        { "id": "A16", "text": "Document uses Arial font as default body text", "type": "binary" },
+        { "id": "A17", "text": "Headings use the correct color scheme (H1: 1B4F72, H2: 2E75B6)", "type": "binary" },
+        { "id": "A18", "text": "Tables use WidthType.DXA (not PERCENTAGE) and ShadingType.CLEAR (not SOLID)", "type": "binary" },
+        { "id": "A19", "text": "Bullet lists use LevelFormat.BULLET numbering (not unicode bullet characters)", "type": "binary" },
+        { "id": "A20", "text": "Video file is deleted after frame extraction (not left on disk)", "type": "binary" }
+      ]
+    },
+    {
+      "name": "code_heavy_video",
+      "prompt": "Create learning notes from a coding tutorial video",
+      "note": "Use a video with significant code shown on screen (programming tutorial, live coding, etc.)",
+      "assertions": [
+        { "id": "B01", "text": "At least 3 code blocks are captured from video screenshots", "type": "binary" },
+        { "id": "B02", "text": "Code blocks include proper imports and are syntactically complete", "type": "binary" },
+        { "id": "B03", "text": "Each major code block has an explanation of what it does", "type": "binary" },
+        { "id": "B04", "text": "Code appears INLINE where it is discussed (not in a separate chapter)", "type": "binary" },
+        { "id": "B05", "text": "Screenshots of code are embedded alongside the transcribed code block", "type": "binary" }
+      ]
+    },
+    {
+      "name": "multi_video_topic",
+      "prompt": "Create combined learning notes from 2 videos on the same topic",
+      "note": "Use two videos covering overlapping content to test merge behavior",
+      "assertions": [
+        { "id": "C01", "text": "Document has a Video Sources table listing both videos", "type": "binary" },
+        { "id": "C02", "text": "Content is organized by THEME not by video", "type": "binary" },
+        { "id": "C03", "text": "Video references [Video 1] [Video 2] appear where content overlaps", "type": "binary" },
+        { "id": "C04", "text": "A comparison table exists for content covered by both videos", "type": "binary" },
+        { "id": "C05", "text": "Executive Summary covers key takeaways from BOTH videos combined", "type": "binary" }
+      ]
+    }
+  ],
+  "scoring": {
+    "total_assertions": 30,
+    "pass_threshold": 27,
+    "perfect_score": 30,
+    "scoring_method": "count true assertions out of total"
+  },
+  "self_improvement": {
+    "instructions": "See references/self_improve_prompt.md for the autonomous improvement loop template",
+    "layer_1": "Skill activation — test trigger phrases to optimize YAML description field",
+    "layer_2": "Output quality — use Karpathy auto research loop with this eval.json"
+  }
+}

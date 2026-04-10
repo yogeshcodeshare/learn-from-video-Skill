@@ -282,7 +282,7 @@ new ExternalHyperlink({
 - Bottom border line in section color
 
 **Footer:**
-- Left: "Notes generated from YouTube video for personal learning use"
+- Left: "Notes generated from video for personal learning use"
 - Center: Page number
 - Right: Date
 - Top border line in light gray
@@ -311,3 +311,88 @@ Detect from transcript content and include on cover page + executive summary:
 - Single video: `{VideoTitle}_LearnFromVideo_Notes.docx` (sanitize, max 80 chars)
 - Multiple videos: `{Topic}_Combined_LearnFromVideo_Notes.docx`
 - Save to user's workspace folder
+
+---
+
+## Agent Output Formats
+
+These are the JSON schemas each agent produces in the v3.0 multi-agent pipeline. The Document Assembler (Agent 5) expects these formats as input.
+
+### Agent 1 Output — Transcript Analysis
+```json
+{
+  "video_id": "abc123",
+  "title": "Video Title",
+  "duration": "12:34",
+  "thematic_outline": [
+    { "theme": "Introduction", "start": "0:00", "end": "1:30" },
+    { "theme": "Core Concept", "start": "1:30", "end": "5:00" }
+  ],
+  "key_timestamps": [
+    { "time": "3:45", "seconds": 225, "type": "CODE", "description": "Shows Express route handler", "duration_hint": "3:45-4:12" },
+    { "time": "7:20", "seconds": 440, "type": "DIAGRAM", "description": "System architecture overview" }
+  ],
+  "transcript_text": "full transcript with timestamps..."
+}
+```
+
+### Agent 2 Output — Screenshot Manifest
+```json
+{
+  "video_id": "abc123",
+  "download_quality": "720p",
+  "total_frames": 45,
+  "frames": [
+    { "filename": "frame_0225.jpg", "timestamp": "3:45", "seconds": 225, "type": "CODE", "source": "targeted" },
+    { "filename": "frame_0250.jpg", "timestamp": "4:10", "seconds": 250, "type": "CODE", "source": "interval" }
+  ],
+  "deduplicated": 8,
+  "video_deleted": true
+}
+```
+
+### Agent 3 Output — Code Blocks
+```json
+{
+  "code_blocks": [
+    {
+      "id": "code_01",
+      "language": "javascript",
+      "filename": "server.js",
+      "timestamp_range": "3:45-4:12",
+      "source_frames": ["frame_0225.jpg", "frame_0228.jpg", "frame_0231.jpg"],
+      "raw_captured": "// lines exactly as seen in video",
+      "completed_code": "// full working code with FROM VIDEO and ADDED FOR COMPLETENESS markers",
+      "explanation": "This code sets up an Express.js server with...",
+      "patterns": ["middleware pattern", "error handling"],
+      "completeness": "partial_completed"
+    }
+  ]
+}
+```
+
+### Agent 4 Output — Visual Content
+```json
+{
+  "visuals": [
+    {
+      "id": "vis_01",
+      "type": "DIAGRAM",
+      "timestamp": "7:20",
+      "source_frame": "frame_0440.jpg",
+      "text_extracted": "All text visible in the screenshot",
+      "mermaid_code": "graph LR\n    A[Client] --> B[API]",
+      "description": "System architecture showing three-tier design",
+      "embed_recommended": true
+    },
+    {
+      "id": "vis_02",
+      "type": "SLIDE",
+      "timestamp": "2:00",
+      "source_frame": "frame_0120.jpg",
+      "text_extracted": "Title: Key Concepts\n- Point 1\n- Point 2",
+      "embed_recommended": true
+    }
+  ]
+}
+```

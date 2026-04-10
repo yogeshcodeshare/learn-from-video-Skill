@@ -2,17 +2,19 @@
 
 > A Claude Code skill that turns any online video into a comprehensive, professional learning report — capturing everything that was **spoken AND shown on screen**.
 
+**v3.0** — Multi-agent parallel architecture with dedicated Code Specialist agent, adaptive screenshot intervals, and automated self-improvement.
+
 ---
 
 ## What It Does
 
 When you share a video URL or file, this skill:
 
-1. **Fetches the full transcript** with timestamps
-2. **Downloads the video** and extracts screenshots at key moments (every 20–30 seconds + targeted visual timestamps)
+1. **Fetches the full transcript** with timestamps and analyzes it for visual content moments
+2. **Downloads the video at 720p** and extracts screenshots using adaptive intervals (3s for code, 30s for talking)
 3. **Reads every screenshot** — extracting slides, diagrams, code, terminal output, architecture flows
-4. **Completes partial code** shown in the video into fully working examples
-5. **Generates a professional Word document (.docx)** that combines spoken content + visuals inline — so reading it feels like watching the video
+4. **Multi-pass code extraction** — captures code from multiple frames, merges fragments, completes to working examples
+5. **Generates a professional Word document (.docx)** that combines spoken content + visuals inline
 
 The result is a thorough report (not a brief summary) where diagrams, code, and visuals appear **inline** exactly where they are discussed — not in a separate appendix.
 
@@ -29,8 +31,6 @@ That's it. The skill is now available in your Claude Code session.
 ---
 
 ## Prerequisites
-
-Make sure the following are installed on your machine:
 
 | Tool | Install |
 |------|---------|
@@ -76,6 +76,37 @@ learnFromVideo /path/to/local/video.mp4
 
 ---
 
+## Speed/Quality Modes
+
+| Mode | Trigger | Video Quality | Screenshot Interval | Code Extraction | Target Time |
+|------|---------|--------------|--------------------|--------------------|-------------|
+| **Fast** | "quick notes", "fast summary" | 480p | 45s fixed | Single-pass | 3-5 min |
+| **Detailed** (default) | All other requests | 720p | 3-45s adaptive | Multi-pass with gap fill | 8-15 min |
+
+---
+
+## Multi-Agent Architecture (v3.0)
+
+The skill uses a **5-agent parallel pipeline** organized in 3 phases:
+
+```
+Phase 1:  Agent 1 (Transcript Analyst)
+              │
+Phase 2:  Agent 2 (Screenshots) ║ Agent 3 (Code Specialist) ║ Agent 4 (Visual Analyst)
+              │
+Phase 3:  Agent 5 (Document Assembler)
+```
+
+| Agent | Role |
+|-------|------|
+| **Transcript Analyst** | Fetches transcript, tags timestamps by content type (CODE, DIAGRAM, SLIDE, etc.) |
+| **Screenshot Extractor** | Downloads at 720p, adaptive intervals (3s for code, 30s for talking), deduplicates |
+| **Code Specialist** | Multi-pass extraction: capture → gap detect → merge fragments → complete → explain |
+| **Visual Content Analyst** | Diagrams → Mermaid, slides → text, data → tables. Smart embed/skip decisions |
+| **Document Assembler** | Combines all outputs into final .docx with inline visuals, code, and diagrams |
+
+---
+
 ## Output
 
 The skill generates a `.docx` Word document saved to your workspace:
@@ -89,31 +120,18 @@ The skill generates a `.docx` Word document saved to your workspace:
 |---------|-------------|
 | Cover Page | Title, channel/source, URL, date, duration |
 | Table of Contents | Manual TOC — works in Word, Google Docs, LibreOffice |
-| Executive Summary | 3–5 key takeaways, audience, difficulty level |
+| Executive Summary | 3-5 key takeaways, audience, difficulty level |
 | Core Content | Adaptive — follows the video's natural flow |
 | Quick Reference | Commands, tools, key facts for quick scanning |
 | Sources & Resources | Video URLs, mentioned tools and links |
 
 ### Within each content section:
-- Embedded screenshots at key visual moments
+- Embedded screenshots at key visual moments (smart selection — face-cam skipped)
 - Reconstructed architecture/workflow diagrams as Mermaid flowcharts
-- Code blocks with language labels — captured exactly as shown, then completed
-- Inline comments on key code lines
+- Code blocks with language labels — captured, merged from multiple frames, completed
+- `FROM VIDEO [timestamp]` and `ADDED FOR COMPLETENESS` markers on code
 - Timestamp references to jump back to the video
 - Visual callout boxes for important on-screen content
-
----
-
-## Example Output
-
-For a 45-minute video on Claude Code tips, the skill produces a 30–50 page Word document with:
-
-- Full spoken content in natural, flowing prose
-- 40–60 embedded screenshots at key moments
-- All code shown on screen captured and completed to working examples
-- Architecture diagrams recreated as Mermaid flowcharts
-- Quick reference table of all commands mentioned
-- Timestamps throughout so you can jump to any moment in the video
 
 ---
 
@@ -121,10 +139,30 @@ For a 45-minute video on Claude Code tips, the skill produces a 30–50 page Wor
 
 Provide multiple video URLs on the same topic and the skill will:
 
+- Identify themes by keyword overlap across transcripts
 - Merge overlapping content by theme (not listed video-by-video)
-- Cross-reference where videos agree or offer different perspectives
+- Cross-reference with [Video 1] / [Video 2] tags where content overlaps
+- Include comparison tables for topics covered by multiple videos
 - Produce one unified document with a "Video Sources" table at the top
-- Rank key takeaways by emphasis across all videos
+
+---
+
+## Self-Improvement (eval.json)
+
+The skill includes an automated evaluation framework with **30 binary assertions** across 3 test types:
+
+| Test | Assertions | Focus |
+|------|-----------|-------|
+| Short tutorial | 20 | Full document structure, formatting, cleanup |
+| Code-heavy video | 5 | Code extraction, completion, inline placement |
+| Multi-video | 5 | Theme merging, cross-referencing, comparison tables |
+
+Run the Karpathy-style self-improvement loop:
+```
+See references/self_improve_prompt.md
+```
+
+This enables autonomous overnight improvement — the skill tests itself, identifies failures, makes ONE change, re-tests, and commits if improved.
 
 ---
 
@@ -134,61 +172,30 @@ Provide multiple video URLs on the same topic and the skill will:
 |-----------|----------|
 | No captions available | Asks user to paste transcript manually |
 | Private / restricted video | Falls back to transcript-only mode |
+| yt-dlp not in PATH | Auto-adds `~/.local/bin` to PATH, falls back to `python -m yt_dlp` |
 | Non-English video | Detected automatically, noted in document header |
 | Very long video (>1 hour) | Screenshot interval increased, "Reading Guide" added |
 | Playlist URL | Each video extracted and processed individually |
 | Partial / garbled transcript | Unclear segments marked `[unclear at timestamp]` |
-| Local video file (.mp4, .mkv, etc.) | Processed directly with ffmpeg — no download needed |
+| Local video file (.mp4, .mkv) | Processed directly with ffmpeg — no download needed |
+| Read-only skill directory | Scripts auto-copied to `/tmp/` |
 
 ---
 
-## How It Works (Under the Hood)
+## Repository Structure
 
 ```
-Video URL / File
-    │
-    ▼
-1. Fetch Transcript (yt-dlp / auto-captions / manual paste)
-    │  → timestamps, chapter detection
-    │
-    ▼
-2. Analyze Transcript for Visual Timestamps
-    │  → find "as you can see", "here's the code", "this diagram" etc.
-    │
-    ▼
-3. Download Video (yt-dlp) + Extract Frames (ffmpeg)
-    │  → every 25s + targeted key moments
-    │
-    ▼
-4. Read & Analyze Every Screenshot
-    │  → slides, code, diagrams, terminal output, UI
-    │
-    ▼
-5. Complete Partial Code
-    │  → add imports, signatures, mark original vs. added
-    │
-    ▼
-6. Combine Transcript + Visuals
-    │  → one unified explanation per topic
-    │
-    ▼
-7. Generate .docx (docx-js)
-    │  → embedded images, Mermaid diagrams, code blocks, TOC
-    │
-    ▼
-Output: Professional Word Document
+learn-from-video-Skill/
+├── README.md                           ← This file
+├── SKILL.md                            ← Main skill definition (v3.0)
+├── scripts/
+│   └── fetch_transcript.py             ← Transcript extraction script
+├── references/
+│   ├── report_structure.md             ← docx-js formatting guide + agent output schemas
+│   └── self_improve_prompt.md          ← Autonomous improvement loop template
+└── eval/
+    └── eval.json                       ← 30 binary assertions for quality testing
 ```
-
----
-
-## Quality Standard
-
-The report should be thorough enough that **reading it gives 90%+ of the value of watching the video**. This means:
-
-- No skipping "minor" points — everything is captured
-- Diagrams and code appear **inline** where discussed (never in a separate appendix)
-- Code is completed to working examples with clear markers for what was added
-- The document reads as one cohesive explanation, not a bullet-point dump
 
 ---
 
