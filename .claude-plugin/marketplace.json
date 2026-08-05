@@ -1,0 +1,21 @@
+{
+  "name": "learn-from-video",
+  "metadata": {
+    "description": "Give Claude a video input, then turn it into a report. /watch ingests (download, frames, transcript); /learn-from-video writes the full Word-document study notes."
+  },
+  "owner": {
+    "name": "yogeshcodeshare"
+  },
+  "plugins": [
+    {
+      "name": "learn-from-video",
+      "description": "Comprehensive .docx learning notes from any video — spoken content and on-screen visuals woven together, with inline code, Mermaid diagrams and embedded screenshots. Includes the /watch ingestion engine.",
+      "author": {
+        "name": "yogeshcodeshare"
+      },
+      "source": "./",
+      "category": "productivity",
+      "homepage": "https://github.com/yogeshcodeshare/learn-from-video-Skill"
+    }
+  ]
+}

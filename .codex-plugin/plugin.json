@@ -1,0 +1,46 @@
+{
+  "name": "learn-from-video",
+  "version": "3.1.0",
+  "description": "Turn any video into a comprehensive Word-document learning report. Bundles /watch (yt-dlp download, scene-aware ffmpeg frames, captions or Whisper transcript) as the ingestion engine and /learn-from-video as the report generator.",
+  "author": {
+    "name": "yogeshcodeshare"
+  },
+  "homepage": "https://github.com/yogeshcodeshare/learn-from-video-Skill",
+  "repository": "https://github.com/yogeshcodeshare/learn-from-video-Skill",
+  "license": "MIT",
+  "keywords": [
+    "video",
+    "watch",
+    "notes",
+    "docx",
+    "report",
+    "learning",
+    "study-guide",
+    "youtube",
+    "transcription",
+    "whisper",
+    "yt-dlp",
+    "ffmpeg",
+    "multimodal",
+    "frames"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "learn-from-video",
+    "shortDescription": "Paste a video URL — get a full Word-document study report back.",
+    "longDescription": "learn-from-video adds two skills. /watch gives the agent a video input: it downloads with yt-dlp, extracts scene-aware frames with ffmpeg, and pulls a timestamped transcript from native captions (or the Whisper API as a fallback). /learn-from-video builds on that engine to produce a comprehensive .docx report that weaves what was said together with what was shown — screenshots embedded inline, code recovered from the screen and completed to working examples, and diagrams recreated as Mermaid.",
+    "developerName": "yogeshcodeshare",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read"
+    ],
+    "websiteURL": "https://github.com/yogeshcodeshare/learn-from-video-Skill",
+    "defaultPrompt": [
+      "learn from this video: https://youtu.be/<id>",
+      "/watch https://youtu.be/<id> what happens at the 30 second mark?",
+      "create detailed notes from these two videos on the same topic"
+    ],
+    "brandColor": "#2563EB"
+  }
+}
