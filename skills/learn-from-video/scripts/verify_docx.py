@@ -76,6 +76,7 @@ def expected_from_report(report: Path, window: int) -> dict | None:
             "transcript_words": data["transcript_words"],
             "min_document_words": data["min_document_words"],
             "windows": [(w["start"], w["start_seconds"], w["end_seconds"]) for w in data["windows"]],
+            "per_window_floor": [w["min_words_expected"] for w in data["windows"]],
         }
     except Exception:
         return None
@@ -88,6 +89,12 @@ def main() -> int:
     ap.add_argument("--window", type=int, default=120)
     ap.add_argument("--min-words", type=int, default=None, help="Override the derived word floor")
     ap.add_argument("--min-images", type=int, default=5)
+    ap.add_argument("--min-coverage", type=float, default=90.0,
+                    help="Minimum %% of transcript windows that must be properly written up. "
+                         "The target is 100%%: every window represented. The 10%% tolerance exists "
+                         "only for genuinely empty stretches -- silence, dead air, an unrelated "
+                         "aside. It is NOT a licence to skip content that was hard to write up. "
+                         "(default 90)")
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()
 
@@ -106,22 +113,45 @@ def main() -> int:
     floor = args.min_words if args.min_words is not None else (
         expected["min_document_words"] if expected else 1500)
 
-    # Timestamp coverage: are references spread across the video, or clustered
-    # in the first few minutes with the rest of the video ignored?
-    found = set()
+    # Coverage. A window is not "covered" merely because its timestamp is
+    # mentioned somewhere -- a passing reference would satisfy that and the
+    # document could still say nothing about it. Instead, attribute document
+    # text to windows: prose following a timestamp belongs to that timestamp's
+    # window, up to the next timestamp. A window counts as REPRESENTED only if
+    # it received a real share of writing.
+    hits = []  # (char_offset, seconds)
     for m in TSTAMP.finditer(body):
         p = m.group(1).split(":")
         try:
             secs = int(p[0]) * 3600 + int(p[1]) * 60 + int(p[2]) if len(p) == 3 else int(p[0]) * 60 + int(p[1])
-            found.add(secs)
         except ValueError:
-            pass
+            continue
+        hits.append((m.start(), secs))
+    found = {s for _, s in hits}
 
     covered = uncovered = None
     coverage_pct = None
+    thin_windows: list[str] = []
     if expected and expected["windows"]:
-        hit = [w for w in expected["windows"] if any(w[1] <= s < w[2] + 1 for s in found)]
-        covered, uncovered = len(hit), len(expected["windows"]) - len(hit)
+        # words attributed to each window
+        words_for: dict[int, int] = {i: 0 for i in range(len(expected["windows"]))}
+        for n, (off, secs) in enumerate(hits):
+            idx = next((i for i, w in enumerate(expected["windows"]) if w[1] <= secs < w[2] + 1), None)
+            if idx is None:
+                continue
+            end = hits[n + 1][0] if n + 1 < len(hits) else len(body)
+            words_for[idx] += len(body[off:end].split())
+
+        represented = []
+        for i, w in enumerate(expected["windows"]):
+            need = expected["per_window_floor"][i] if expected.get("per_window_floor") else 120
+            # half the per-window floor is the bar for "genuinely written about"
+            if words_for[i] >= max(60, need * 0.5):
+                represented.append(i)
+            else:
+                thin_windows.append(f"{w[0]} ({words_for[i]}w written, need >= {int(max(60, need * 0.5))}w)")
+        covered = len(represented)
+        uncovered = len(expected["windows"]) - covered
         coverage_pct = round(100 * covered / len(expected["windows"]), 1)
 
     failures = []
@@ -130,9 +160,12 @@ def main() -> int:
                         f"The document summarises instead of teaching — regenerate with real content per window.")
     if stats["images"] < args.min_images:
         failures.append(f"TOO FEW IMAGES: {stats['images']}, need >= {args.min_images}")
-    if coverage_pct is not None and coverage_pct < 80:
-        failures.append(f"POOR COVERAGE: only {coverage_pct}% of transcript windows are referenced "
-                        f"({uncovered} windows have no timestamp in the document)")
+    if coverage_pct is not None and coverage_pct < args.min_coverage:
+        detail = "; ".join(thin_windows[:8]) + (" …" if len(thin_windows) > 8 else "")
+        failures.append(
+            f"POOR COVERAGE: only {coverage_pct}% of transcript windows are properly represented "
+            f"(need >= {args.min_coverage}%). {uncovered} window(s) got little or no writing. "
+            f"Write these up properly: {detail}")
 
     result = {
         "file": str(path),
@@ -148,6 +181,7 @@ def main() -> int:
         "windows_covered": covered,
         "windows_uncovered": uncovered,
         "coverage_pct": coverage_pct,
+        "thin_windows": thin_windows,
         "transcript_words": expected["transcript_words"] if expected else None,
         "passed": not failures,
         "failures": failures,
@@ -163,7 +197,9 @@ def main() -> int:
         print(f"tables        : {stats['tables']}")
         if expected:
             print(f"transcript    : {expected['transcript_words']} words over {expected['duration']}")
-            print(f"coverage      : {coverage_pct}%  ({covered}/{covered + uncovered} windows referenced)")
+            print(f"coverage      : {coverage_pct}%  ({covered}/{covered + uncovered} windows properly represented)")
+            if thin_windows:
+                print("thin windows  : " + ", ".join(thin_windows[:6]) + (" ..." if len(thin_windows) > 6 else ""))
         print()
         if failures:
             print("RESULT: FAILED")

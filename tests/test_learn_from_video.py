@@ -5,6 +5,7 @@ No network, no ffmpeg, no API keys. Fixtures are synthesised in-process.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 import zipfile
@@ -51,11 +52,26 @@ def make_report(path: Path, minutes: int = 10, hindi: bool = False) -> Path:
     return path
 
 
-def make_docx(path: Path, words: int, images: int = 0, timestamps: list[str] | None = None) -> Path:
-    """A minimal but structurally valid .docx."""
-    text = " ".join(f"word{i}" for i in range(words))
-    if timestamps:
-        text += " " + " ".join(timestamps)
+def make_docx(path: Path, words: int, images: int = 0, timestamps: list[str] | None = None,
+              stuff: bool = False) -> Path:
+    """A minimal but structurally valid .docx.
+
+    When `timestamps` are given the words are distributed AFTER each timestamp,
+    which is what a real document looks like. `stuff=True` instead crams the
+    timestamps together with no prose -- the loophole the coverage metric must
+    reject.
+    """
+    if timestamps and not stuff:
+        per = max(1, words // len(timestamps))
+        parts = []
+        for n, ts in enumerate(timestamps):
+            parts.append(ts)
+            parts.extend(f"w{n}x{i}" for i in range(per))
+        text = " ".join(parts)
+    else:
+        text = " ".join(f"word{i}" for i in range(words))
+        if timestamps:
+            text += " " + " ".join(timestamps)
     doc = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
@@ -176,6 +192,43 @@ def test_verify_coverage_passes_when_spread(tmp_path):
     assert p.returncode == 0
 
 
+def test_verify_rejects_timestamp_stuffing(tmp_path):
+    """A document may not pass by NAMING every window while writing nothing.
+
+    This is the loophole a mention-based coverage metric leaves open: sprinkle
+    timestamps through a thin document and coverage reads 100%.
+    """
+    r = make_report(tmp_path / "r.md", minutes=20)              # 10 windows
+    stamps = [f"{m}:30" for m in range(0, 20, 2)]               # every window named
+    d = tmp_path / "stuffed.docx"
+    # all timestamps crammed together, no prose attributed to any of them
+    make_docx(d, words=30, images=10, timestamps=stamps, stuff=True)
+    p = run("verify_docx.py", str(d), "--report", str(r), "--window", "120", "--json")
+    res = json.loads(out(p))
+    assert res["coverage_pct"] < 80, "naming a window must not count as covering it"
+    assert res["thin_windows"], "the thin windows must be named so they can be fixed"
+    assert p.returncode == 4
+
+
+def test_verify_reports_which_windows_are_thin(tmp_path):
+    r = make_report(tmp_path / "r.md", minutes=10)
+    d = make_docx(tmp_path / "x.docx", words=100, images=10, timestamps=["0:30"])
+    res = json.loads(out(run("verify_docx.py", str(d), "--report", str(r),
+                             "--window", "120", "--json")))
+    assert len(res["thin_windows"]) >= 4
+    assert all("w written" in t for t in res["thin_windows"])
+
+
+def test_verify_min_coverage_is_configurable(tmp_path):
+    r = make_report(tmp_path / "r.md", minutes=10)
+    d = make_docx(tmp_path / "x.docx", words=100, images=10, timestamps=["0:30"])
+    strict = run("verify_docx.py", str(d), "--report", str(r), "--min-coverage", "80", "--json")
+    loose = run("verify_docx.py", str(d), "--report", str(r), "--min-coverage", "0",
+                "--min-words", "10", "--json")
+    assert strict.returncode == 4
+    assert json.loads(out(loose))["passed"] is True
+
+
 def test_verify_rejects_missing_and_corrupt_files(tmp_path):
     assert run("verify_docx.py", str(tmp_path / "nope.docx")).returncode == 1
     bad = tmp_path / "bad.docx"
@@ -256,3 +309,152 @@ def test_ingest_detects_transcript_presence(ingest_mod):
 
 def test_ingest_finds_engine(ingest_mod):
     assert ingest_mod.find_engine().is_file()
+
+
+# ------------------------------------------------------------------ state.py
+
+def test_state_init_and_status(tmp_path):
+    w = str(tmp_path / "work")
+    assert run("state.py", w, "init", "--source", "v.mp4", "--title", "T").returncode == 0
+    s = json.loads(out(run("state.py", w, "status")))
+    assert s["source"] == "v.mp4" and s["title"] == "T"
+    assert s["completed"] == 0 and s["complete"] is False
+    assert s["next_phase"] == "transcript"
+
+
+def test_state_round_trips_phase_data(tmp_path):
+    """The point of state: expensive analysis survives a crash."""
+    w = str(tmp_path / "work")
+    run("state.py", w, "init", "--source", "v.mp4")
+    payload = tmp_path / "frames.json"
+    payload.write_text(json.dumps({"frames": [{"path": "a.jpg", "t": "1:00"}]}), encoding="utf-8")
+    assert run("state.py", w, "set", "frames", "--json-file", str(payload)).returncode == 0
+    got = json.loads(out(run("state.py", w, "get", "frames")))
+    assert got["frames"][0]["path"] == "a.jpg"
+
+
+def test_state_get_pending_phase_signals_not_done(tmp_path):
+    w = str(tmp_path / "work")
+    run("state.py", w, "init", "--source", "v.mp4")
+    assert run("state.py", w, "get", "code").returncode == 3
+
+
+def test_state_next_advances_and_completes(tmp_path):
+    w = str(tmp_path / "work")
+    run("state.py", w, "init", "--source", "v.mp4")
+    for ph in ["transcript", "windows", "frames", "code", "visuals", "document"]:
+        assert json.loads(out(run("state.py", w, "next")))["next_phase"] == ph
+        run("state.py", w, "done", ph)
+    n = json.loads(out(run("state.py", w, "next")))
+    assert n["complete"] is True and n["next_phase"] is None
+
+
+def test_state_survives_a_corrupt_file(tmp_path):
+    """A broken state file must never block a run."""
+    w = tmp_path / "work"
+    w.mkdir()
+    (w / ".lfv-state.json").write_text("{ not json", encoding="utf-8")
+    p = run("state.py", str(w), "status")
+    assert p.returncode == 0
+    assert (w / ".lfv-state.corrupt").exists()
+
+
+def test_state_reset_single_phase(tmp_path):
+    w = str(tmp_path / "work")
+    run("state.py", w, "init", "--source", "v.mp4")
+    run("state.py", w, "done", "transcript")
+    run("state.py", w, "done", "frames")
+    run("state.py", w, "reset", "frames")
+    s = json.loads(out(run("state.py", w, "status")))
+    assert s["phases"]["transcript"] == "done"
+    assert s["phases"]["frames"] == "pending"
+
+
+# -------------------------------------------------------------- build_docx.js
+
+def _node_docx_available() -> bool:
+    import shutil
+    if not (shutil.which("node") or shutil.which("node.exe")):
+        return False
+    root = Path(__file__).parent.parent
+    return (root / "node_modules" / "docx").is_dir()
+
+
+needs_docx = pytest.mark.skipif(not _node_docx_available(),
+                                reason="node + docx not installed (npm install docx)")
+
+
+@needs_docx
+def test_build_docx_renders_every_block_type(tmp_path):
+    import shutil
+    root = Path(__file__).parent.parent
+    img = tmp_path / "shot.jpg"
+    img.write_bytes(bytes.fromhex("ffd8ffe000104a46494600010100000100010000ffd9"))
+    spec = {
+        "output": str(tmp_path / "out.docx"),
+        "title": "T", "subtitle": "S", "meta": [["K", "V"]],
+        "toc": [["1", "One", 3]],
+        "sections": [{"heading": "1. One", "blocks": [
+            {"type": "h2", "text": "h2"}, {"type": "h3", "text": "h3"},
+            {"type": "p", "text": "para"},
+            {"type": "ts", "time": "1:00", "text": "timestamped"},
+            {"type": "bullets", "items": ["a", "b"]},
+            {"type": "image", "path": str(img), "caption": "cap"},
+            {"type": "table", "headers": ["A"], "rows": [["1"]], "widths": [4000]},
+            {"type": "callout", "style": "warn", "title": "W", "body": ["x"]},
+            {"type": "code", "language": "js", "text": "const a=1;"},
+            {"type": "mermaid", "text": "graph LR\n A-->B"},
+            {"type": "spacer"}, {"type": "pagebreak"},
+        ]}],
+    }
+    sp = tmp_path / "spec.json"
+    sp.write_text(json.dumps(spec), encoding="utf-8")
+    node = shutil.which("node") or shutil.which("node.exe")
+    r = subprocess.run([node, str(root / "skills" / "learn-from-video" / "scripts" / "build_docx.js"), str(sp)],
+                       capture_output=True, cwd=str(root), timeout=180)
+    assert r.returncode == 0, r.stderr.decode()
+    res = json.loads(r.stdout.decode("utf-8", errors="replace"))
+    assert res["ok"] is True and res["images"] == 1
+    assert res["warnings"] == []
+    with zipfile.ZipFile(spec["output"]) as z:
+        assert any(n.startswith("word/media/") for n in z.namelist())
+
+
+@needs_docx
+def test_build_docx_warns_on_missing_image_but_still_renders(tmp_path):
+    import shutil
+    root = Path(__file__).parent.parent
+    spec = {"output": str(tmp_path / "o.docx"), "title": "T",
+            "sections": [{"heading": "S", "blocks": [{"type": "image", "path": str(tmp_path / "nope.jpg")}]}]}
+    sp = tmp_path / "s.json"
+    sp.write_text(json.dumps(spec), encoding="utf-8")
+    node = shutil.which("node") or shutil.which("node.exe")
+    r = subprocess.run([node, str(root / "skills" / "learn-from-video" / "scripts" / "build_docx.js"), str(sp)],
+                       capture_output=True, cwd=str(root), timeout=180)
+    assert r.returncode == 0
+    res = json.loads(r.stdout.decode("utf-8", errors="replace"))
+    assert any("missing image" in w for w in res["warnings"])
+    assert Path(spec["output"]).is_file()
+
+
+@needs_docx
+def test_build_docx_clamps_oversized_tables(tmp_path):
+    """Column widths wider than the page must be scaled, not allowed to overflow."""
+    import shutil
+    root = Path(__file__).parent.parent
+    spec = {"output": str(tmp_path / "o.docx"), "title": "T",
+            "sections": [{"heading": "S", "blocks": [
+                {"type": "table", "headers": ["A", "B"], "rows": [["1", "2"]], "widths": [20000, 20000]}]}]}
+    sp = tmp_path / "s.json"
+    sp.write_text(json.dumps(spec), encoding="utf-8")
+    node = shutil.which("node") or shutil.which("node.exe")
+    r = subprocess.run([node, str(root / "skills" / "learn-from-video" / "scripts" / "build_docx.js"), str(sp)],
+                       capture_output=True, cwd=str(root), timeout=180)
+    assert r.returncode == 0
+    with zipfile.ZipFile(spec["output"]) as z:
+        xml = z.read("word/document.xml").decode("utf-8", errors="replace")
+    # Only the table's own grid columns — page width lives in sectPr and is
+    # legitimately larger.
+    cols = [int(m) for m in re.findall(r'<w:gridCol\s+w:w="(\d+)"', xml)]
+    assert cols, "table grid columns not found"
+    assert sum(cols) <= 9360, f"table overflows the page: {cols}"

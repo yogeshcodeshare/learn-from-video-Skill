@@ -1,6 +1,6 @@
 ---
 name: learn-from-video
-version: "3.2.0"
+version: "3.3.0"
 description: "Create comprehensive, report-style learning notes from any video — called 'learnFromVideo'. Use this skill whenever the user shares a video URL or file and wants notes, a summary, a study guide, or learning material from it. Also triggers when the user says 'learn from this video', 'learnFromVideo', 'create notes from this video', 'make notes for this video', 'I watched this video and need notes', 'summarize this video in detail', 'take notes from this lecture', 'notes from this tutorial', 'I don't have time to watch this video', or shares one or more video URLs/files and asks for any kind of written output about the content. This skill handles single videos and multiple videos on the same topic, producing a professional Word document (.docx) report with full detail — not a brief summary, but a thorough report capturing everything spoken AND shown in the video, including diagrams, workflows, code, and architecture recreated as Mermaid flowcharts."
 argument-hint: "<video-url-or-path> [extra instructions]"
 allowed-tools: Bash, Read, Write, Task, AskUserQuestion
@@ -11,7 +11,7 @@ license: MIT
 user-invocable: true
 ---
 
-# learnFromVideo — v3.2
+# learnFromVideo — v3.3
 
 Produce a Word document so thorough that reading it is as good as watching the video. Not a summary — a **replacement**.
 
@@ -98,6 +98,21 @@ python3 "${SKILL_DIR}/scripts/segment.py" "$WORK/.lfv-cache/report-<key>.md" --w
 
 Returns every window with its verbatim text, plus `min_document_words` — the floor your document must clear. **Keep this JSON. It is your work plan.**
 
+### Record state as you go
+
+```bash
+python3 "${SKILL_DIR}/scripts/state.py" "$WORK" init --source "<SOURCE>" --title "..."
+python3 "${SKILL_DIR}/scripts/state.py" "$WORK" set transcript --json-file t.json
+python3 "${SKILL_DIR}/scripts/state.py" "$WORK" set frames --json-file manifest.json
+python3 "${SKILL_DIR}/scripts/state.py" "$WORK" status
+```
+
+Phases: `transcript · windows · frames · code · visuals · document`.
+
+Write each phase's output to state **as it completes**. `ingest.py` caches the transcript, but the *analysis* — which timestamps matter, what each frame shows, code reconstructed across frames — costs image tokens that are already spent. Losing it to a crash at Agent 4 means paying twice.
+
+On any resumed run, check `state.py "$WORK" status` first and read back completed phases instead of re-deriving them.
+
 ### Then tag the visual moments
 
 Read the transcript and mark every timestamp where something is shown:
@@ -161,7 +176,8 @@ The test for any sentence: **could a reader act on it without watching the video
 
 - **One subsection per window.** 20 windows → 20 subsections. Do not merge windows to save effort; merge only when genuinely one continuous topic, and then cover both windows' content in full.
 - **Clear `min_document_words`** from `segment.py`. It is a floor, not a target.
-- **≥80% window coverage**, measured by timestamp references spread across the document.
+- **Coverage target is 100%. The gate fails below 90%.** Every transcript window gets written up. The 10% tolerance exists only for genuinely empty stretches — silence, dead air, an unrelated aside — never for content that was merely hard to write up.
+- Coverage is measured by **words attributed to each window**, not by mentions. Naming a timestamp and writing nothing does not count; the verifier attributes prose following each timestamp to that window and requires a real share.
 - **Every screenshot needs surrounding narrative** from its own timestamp — a caption alone is not coverage.
 - **Reproduce all lists in full.** If a dropdown has 7 options, all 7 appear.
 - **Long videos produce long documents.** A 40-minute tutorial is 25–40 pages. If yours is 10, you summarised.
@@ -194,21 +210,25 @@ Embed vs skip: **embed** slides, editor code, dashboards, architecture diagrams,
 
 ## Step 6 — Assemble the document (Agent 5)
 
-Read `${SKILL_DIR}/references/report_structure.md` for docx-js patterns, then `npm install docx` (local, never global).
+**Do not hand-write docx-js.** Produce a JSON spec and render it:
+
+```bash
+npm install docx                     # local, never global
+python3 -c "..."                     # write spec.json
+node "${SKILL_DIR}/scripts/build_docx.js" spec.json
+```
+
+`build_docx.js` owns every docx-js gotcha once, correctly, and is covered by tests. Block types: `h2` `h3` `p` `ts` `bullets` `image` `table` `callout` `code` `mermaid` `spacer` `pagebreak`. See the header comment in the script for the full schema. It returns JSON with counts and warnings (e.g. missing images), so you can check the render before verifying.
+
+Read `${SKILL_DIR}/references/report_structure.md` for structural guidance.
 
 **Fixed elements:** Cover · Manual TOC · Executive Summary · **[adaptive core content]** · Quick Reference tables · Source & Attribution.
 
 **Adaptive core** follows the video's own flow — a tutorial goes Setup → Step 1 → Step 2; a system-design talk goes Problem → Architecture → Trade-offs. Within each section weave spoken content, screenshots, code and diagrams together **inline**. A reader must never flip elsewhere to see what was on screen.
 
-### docx-js gotchas
+### docx-js gotchas — handled for you
 
-- `ImageRun` **requires** `type: 'jpg'` or `'png'`; read the file as a Buffer.
-- Max image width ~560px for 1-inch margins on US Letter.
-- Build a **manual TOC**; the `TableOfContents` widget renders empty outside Word.
-- `ShadingType.CLEAR`, not `SOLID` (SOLID renders black).
-- Set both `columnWidths` on `Table` and `width` on every `TableCell`.
-- `WidthType.DXA`, not `PERCENTAGE`.
-- `LevelFormat.BULLET` for bullets, never unicode characters.
+`build_docx.js` already applies all of these. They are listed only so you do not reintroduce them if you ever bypass it: `ImageRun` requires `type`; images clamp to 560px; the TOC must be manual because the widget renders empty outside Word; `ShadingType.CLEAR` not `SOLID`; tables need width in two places and `WidthType.DXA`; `LevelFormat.BULLET` for bullets. Oversized table widths are scaled to fit rather than overflowing the page.
 
 ### Non-English and machine transcripts
 
@@ -231,7 +251,7 @@ python3 "${SKILL_DIR}/scripts/verify_docx.py" "<OUT.docx>" \
 | `1` | File invalid or unreadable |
 | `4` | **Density failure — do NOT deliver.** Regenerate with real content in the windows it flags. |
 
-On exit 4 the tool names the problem: too few words, too few images, or which windows have no coverage. Fix those windows specifically and re-run. **Do not lower the thresholds to make it pass.**
+On exit 4 the tool names the problem and lists each thin window as `MM:SS (Nw written, need >= Mw)`. Go back to those windows in the `segment.py` output, write them up properly from their verbatim text, and re-run. **Never lower `--min-coverage` or `--min-words` to make it pass** — that reintroduces the exact defect the gate exists to catch.
 
 Then read back 3–5 random sections and confirm each has both spoken content and on-screen detail woven together, code inline where discussed, and captioned screenshots.
 
@@ -282,7 +302,7 @@ Runs `yt-dlp` and `ffmpeg`/`ffprobe` locally. Sends **extracted audio only** —
 
 Does not access any platform account, does not share keys between providers, does not log keys anywhere.
 
-**Bundled scripts:** `ingest.py` (cached, retrying, encoding-safe engine wrapper) · `preflight.py` (dependency check) · `segment.py` (transcript windows + coverage plan) · `verify_docx.py` (density verification) · `fetch_transcript.py` (legacy YouTube-only fallback). The engine itself lives in the sibling `watch` skill.
+**Bundled scripts:** `ingest.py` (cached, retrying, encoding-safe engine wrapper) · `preflight.py` (dependency check) · `segment.py` (transcript windows + coverage plan) · `state.py` (durable phase state for resume) · `build_docx.js` (spec → .docx renderer) · `verify_docx.py` (density gate) · `fetch_transcript.py` (legacy YouTube-only fallback). The engine itself lives in the sibling `watch` skill.
 
 Review scripts before first use.
 
