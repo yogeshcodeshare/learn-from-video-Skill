@@ -2,7 +2,27 @@
 
 > Turn any video into a comprehensive, professional learning report — capturing everything that was **spoken AND shown on screen**.
 
-**v3.1** — now running on the `watch` ingestion engine: any yt-dlp-supported site, Whisper fallback for videos without captions, scene-aware frame selection, and a setup preflight that installs what's missing.
+**v3.2** — enforced content depth, a caching/retrying ingestion wrapper, and 92 tests. Built on the `watch` engine: any yt-dlp-supported site, Whisper fallback for videos without captions, scene-aware frame selection, and a setup preflight that installs what's missing.
+
+---
+
+## The thing that makes this different
+
+Most video-to-notes tools produce a document that *looks* finished and teaches nothing — headings, screenshots, and a paragraph per section saying that a topic was discussed.
+
+This skill measures itself against that failure. `segment.py` slices the transcript into time windows and requires a written subsection for each; `verify_docx.py` then measures the finished document against the transcript and **refuses to deliver** if it's too thin or skips windows:
+
+```
+words         : 4329   (floor 2848)
+images        : 35
+coverage      : 60.0%  (12/20 windows referenced)
+
+RESULT: FAILED
+  - POOR COVERAGE: only 60.0% of transcript windows are referenced
+    (8 windows have no timestamp in the document)
+```
+
+That's a real run being caught and sent back.
 
 ---
 

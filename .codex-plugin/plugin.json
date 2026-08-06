@@ -1,6 +1,6 @@
 {
   "name": "learn-from-video",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "description": "Turn any video into a comprehensive Word-document learning report. Bundles /watch (yt-dlp download, scene-aware ffmpeg frames, captions or Whisper transcript) as the ingestion engine and /learn-from-video as the report generator.",
   "author": {
     "name": "yogeshcodeshare"

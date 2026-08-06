@@ -18,6 +18,10 @@ The split is deliberate: `/watch` gives the model *eyes*, `learn-from-video` dec
 - `skills/learn-from-video/references/report_structure.md` — docx-js formatting patterns.
 - `skills/learn-from-video/references/self_improve_prompt.md` — autonomous improvement loop.
 - `skills/learn-from-video/eval/eval.json` — 30 binary output-quality assertions.
+- `skills/learn-from-video/scripts/ingest.py` — **the only supported way to call the engine.** Adds UTF-8 safety, transcript caching and 5xx retries. Never call `watch.py` directly from this skill.
+- `skills/learn-from-video/scripts/segment.py` — transcript → time windows + coverage checklist + word floor.
+- `skills/learn-from-video/scripts/verify_docx.py` — density gate. Exit `4` = too thin, do not deliver.
+- `skills/learn-from-video/scripts/preflight.py` — Node/npm + engine check, run *before* frame extraction.
 - `skills/learn-from-video/scripts/fetch_transcript.py` — legacy YouTube-only transcript fallback for environments without yt-dlp.
 - `skills/*/scripts/build-skill.sh` — build `dist/<name>.skill` for claude.ai upload (dev-only).
 - `hooks/` — Claude Code SessionStart setup-status hook (Claude Code only).
@@ -34,7 +38,9 @@ The split is deliberate: `/watch` gives the model *eyes*, `learn-from-video` dec
 - **`learn-from-video` depends on `watch` as a sibling directory** (`$SKILL_DIR/../watch`). Keep them in the same plugin. If you ever split them, the report skill degrades to `fetch_transcript.py` and no frames.
 - **Path resolution is harness-agnostic.** Each SKILL.md resolves `SKILL_DIR` as the directory of the SKILL.md the model just Read. Do NOT reintroduce `${CLAUDE_SKILL_DIR}` (Claude-Code-only) — it is unset on Codex/Cursor/agents and breaks every script call there.
 - **No `commands/` wrapper.** Slash commands derive from SKILL.md frontmatter (`name:` + `user-invocable: true`). A separate command file creates a duplicate.
-- **Never hand-roll `yt-dlp`/`ffmpeg` in a SKILL.md.** That was the v3.0 design and it was fragile. All ingestion goes through `watch.py`.
+- **Never hand-roll `yt-dlp`/`ffmpeg` in a SKILL.md.** That was the v3.0 design and it was fragile. All ingestion goes through `watch.py`, and from learn-from-video always via `ingest.py`.
+- **`skills/watch/` is vendored byte-identical to upstream and must stay that way.** Verify with `git rev-parse HEAD:skills/watch` — it must equal `a998b18e29c46ecc7d08c4aad90db1cdd757cc7d`. Fixes for engine bugs belong in `learn-from-video/scripts/` as a wrapper, not as edits to the vendored tree. This keeps future upstream merges clean.
+- **Depth is enforced, not encouraged.** `verify_docx.py` exit `4` blocks delivery. Do not "fix" a density failure by lowering thresholds — that reintroduces the exact defect the gate exists to catch.
 
 ## Install surfaces
 
