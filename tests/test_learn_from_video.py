@@ -458,3 +458,16 @@ def test_build_docx_clamps_oversized_tables(tmp_path):
     cols = [int(m) for m in re.findall(r'<w:gridCol\s+w:w="(\d+)"', xml)]
     assert cols, "table grid columns not found"
     assert sum(cols) <= 9360, f"table overflows the page: {cols}"
+
+
+def test_verify_attributes_boundary_timestamps_to_the_right_window(tmp_path):
+    """Windows are contiguous, so a timestamp on a boundary belongs to the
+    window it STARTS, not the one it ends. Getting this wrong credited text to
+    the previous window and made the final window read as empty."""
+    r = make_report(tmp_path / "r.md", minutes=6)          # windows at 0:00, 2:00, 4:00
+    d = make_docx(tmp_path / "b.docx", words=900, images=6,
+                  timestamps=["0:00", "2:00", "4:00"])     # every one on a boundary
+    res = json.loads(out(run("verify_docx.py", str(d), "--report", str(r),
+                             "--window", "120", "--json")))
+    assert res["coverage_pct"] == 100.0, f"boundary timestamps mis-attributed: {res['thin_windows']}"
+    assert res["windows_uncovered"] == 0

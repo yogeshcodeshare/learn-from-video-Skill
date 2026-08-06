@@ -41,13 +41,44 @@
  */
 'use strict';
 
+const fs = require('fs');
+const path = require('path');
+
+/**
+ * Resolve `docx` from the CALLER's directory, not this script's.
+ *
+ * The skill is installed under ~/.claude/skills/... but `npm install docx`
+ * happens in the user's working directory. Node resolves modules relative to
+ * the script, so a plain require('docx') fails with MODULE_NOT_FOUND even
+ * though docx is installed exactly where the instructions said to install it.
+ */
+function loadDocx() {
+  const tried = [];
+  const candidates = [
+    null,                                             // normal resolution
+    path.join(process.cwd(), 'node_modules', 'docx'), // caller's cwd
+    ...(process.env.NODE_PATH ? [path.join(process.env.NODE_PATH, 'docx')] : []),
+  ];
+  for (const c of candidates) {
+    try {
+      return c ? require(c) : require('docx');
+    } catch (e) {
+      tried.push(c || 'docx');
+    }
+  }
+  console.error(
+    'ERROR: the `docx` package could not be found.\n' +
+    `  Looked in: ${tried.join(', ')}\n` +
+    '  Fix: run `npm install docx` in your working directory, then re-run from that directory.'
+  );
+  process.exit(2);
+}
+
 const {
   Document, Packer, Paragraph, TextRun, ImageRun, AlignmentType, HeadingLevel,
   Table, TableRow, TableCell, WidthType, BorderStyle, ShadingType, LevelFormat,
   Header, Footer, PageNumber, convertInchesToTwip, PageBreak,
-} = require('docx');
-const fs = require('fs');
-const path = require('path');
+} = loadDocx();
 
 const C = { orange: 'E8590C', grey: '666666', dark: '1A1A1A', blue: '1B5E9E', red: 'B02A2A', code: '0B3D2E' };
 const STYLE = { key: C.orange, warn: C.red, screen: C.blue };

@@ -135,10 +135,22 @@ def main() -> int:
     if expected and expected["windows"]:
         # words attributed to each window
         words_for: dict[int, int] = {i: 0 for i in range(len(expected["windows"]))}
+        last_end = expected["windows"][-1][2]
         for n, (off, secs) in enumerate(hits):
-            idx = next((i for i, w in enumerate(expected["windows"]) if w[1] <= secs < w[2] + 1), None)
-            if idx is None:
-                continue
+            # Windows are contiguous: window N ends exactly where N+1 begins.
+            # A naive `start <= secs <= end` test therefore matches the EARLIER
+            # window for any timestamp sitting on a boundary, so text written
+            # about e.g. 38:00 was credited to the 36:00 window and the 38:00
+            # window read as empty. Attribute to the LAST window that starts at
+            # or before the timestamp instead.
+            idx = None
+            for i, w in enumerate(expected["windows"]):
+                if secs >= w[1]:
+                    idx = i
+                else:
+                    break
+            if idx is None or secs > last_end:
+                continue                      # timestamp outside the video
             end = hits[n + 1][0] if n + 1 < len(hits) else len(body)
             words_for[idx] += len(body[off:end].split())
 
