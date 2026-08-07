@@ -40,6 +40,9 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).parent.resolve()
 CACHE_VERSION = 1
 
+sys.path.insert(0, str(SCRIPT_DIR))
+import chunked_whisper  # noqa: E402  (needs SCRIPT_DIR on the path first)
+
 # Force UTF-8 on our own streams so we can print anything the engine returns.
 for _s in (sys.stdout, sys.stderr):
     try:
@@ -108,7 +111,24 @@ TRANSIENT_MARKERS = (
 )
 
 
+# The engine already runs its own 4 attempts before printing this. Once it
+# gives up, the wrapper retrying 3 more times just repeats a settled failure —
+# on lesson 8 that turned one guaranteed error into 16 calls over ~25 minutes.
+EXHAUSTED_MARKERS = (
+    "whisper fallback failed",
+    "Whisper request failed after",
+    "Whisper failed on every audio chunk",
+)
+
+
+def looks_exhausted(stderr: str) -> bool:
+    """True when the engine already exhausted its own retries."""
+    return any(m in stderr for m in EXHAUSTED_MARKERS)
+
+
 def looks_transient(stderr: str) -> bool:
+    if looks_exhausted(stderr):
+        return False
     return any(m in stderr for m in TRANSIENT_MARKERS)
 
 
@@ -119,6 +139,24 @@ def has_transcript(report: str) -> bool:
 
 def wants_transcript(passthrough: list[str]) -> bool:
     return "--no-whisper" not in passthrough
+
+
+def _flag_value(passthrough: list[str], flag: str) -> str | None:
+    """Read `--flag value` or `--flag=value` out of the passthrough args."""
+    for i, arg in enumerate(passthrough):
+        if arg == flag and i + 1 < len(passthrough):
+            return passthrough[i + 1]
+        if arg.startswith(f"{flag}="):
+            return arg.split("=", 1)[1]
+    return None
+
+
+def detail_of(passthrough: list[str]) -> str | None:
+    return _flag_value(passthrough, "--detail")
+
+
+def whisper_of(passthrough: list[str]) -> str | None:
+    return _flag_value(passthrough, "--whisper")
 
 
 def run_engine(engine: Path, source: str, passthrough: list[str]) -> tuple[int, str, str]:
@@ -147,6 +185,8 @@ def main() -> int:
     ap.add_argument("--retry-wait", type=float, default=5.0, help="Initial backoff seconds (doubles each retry)")
     ap.add_argument("--no-cache", action="store_true", help="Ignore any cached report and re-run")
     ap.add_argument("--json", action="store_true", help="Emit a JSON status object instead of the raw report")
+    ap.add_argument("--no-chunked", action="store_true",
+                    help="Never use the chunked transcriber, even for long local videos")
     args, passthrough = ap.parse_known_args()
 
     engine = find_engine()
@@ -185,6 +225,60 @@ def main() -> int:
             print(report)
         print(f"[ingest] cache hit ({report_path.name}) — engine not re-run", file=sys.stderr)
         return 0
+
+    # ---- long local video: bypass the engine's broken chunker ------------
+    # The engine slices chunks with `-c copy`, which Groq rejects with HTTP 500
+    # for every chunk after the first. Rather than spend a long upload finding
+    # that out again, transcribe here when the source is long enough to hit it.
+    if (wants_transcript(passthrough)
+            and detail_of(passthrough) == "transcript"
+            and not args.no_chunked):
+        local = Path(args.source).expanduser()
+        if local.is_file():
+            duration = chunked_whisper.ffprobe_duration(local)
+            if chunked_whisper.needs_chunking(duration):
+                print(f"[ingest] {duration/60:.0f}min source — the engine's chunker "
+                      f"would fail here; using the chunked wrapper instead",
+                      file=sys.stderr)
+                backend, api_key = chunked_whisper.load_api_key(whisper_of(passthrough))
+                if not api_key:
+                    print("[ingest] no Whisper API key found — cannot transcribe",
+                          file=sys.stderr)
+                    return 1
+                segments, complete = chunked_whisper.transcribe(
+                    local, work, backend, api_key,
+                    log=lambda m: print(f"[chunked] {m}", file=sys.stderr),
+                )
+                if segments:
+                    report = chunked_whisper.render_report(
+                        args.source, duration, segments, complete=complete)
+                    # Only cache a complete transcript; a partial one must not
+                    # masquerade as a finished result on the next run.
+                    if complete:
+                        report_path.write_text(report, encoding="utf-8")
+                        meta_path.write_text(json.dumps({
+                            "cached_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                            "source": args.source, "flags": passthrough,
+                            "has_transcript": True, "attempts": 1,
+                            "path": "chunked",
+                        }, indent=2), encoding="utf-8")
+                    else:
+                        (cache_dir / f"partial-{key}.md").write_text(
+                            report, encoding="utf-8")
+                    result = {
+                        "status": "ok" if complete else "partial",
+                        "cache_hit": False, "attempts": 1,
+                        "has_transcript": True, "complete": complete,
+                        "segments": len(segments),
+                        "work_dir": str(work), "path": "chunked",
+                    }
+                    if args.json:
+                        print(json.dumps(result, indent=2))
+                    else:
+                        print(report)
+                    return 0 if complete else 2
+                print("[ingest] chunked transcription produced nothing", file=sys.stderr)
+                return 1
 
     # ---- run, with retries ----------------------------------------------
     wait = args.retry_wait
